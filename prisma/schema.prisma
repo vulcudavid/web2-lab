@@ -1,0 +1,323 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  STUDENT
+  COMPANY_TUTOR
+  COORDINATOR
+  ADMIN
+}
+
+enum EngineeringDomain {
+  COMPUTER_SCIENCE_IT
+  ELECTRONICS_TELECOM
+  ROBOTICS_MECHATRONICS
+  INDUSTRIAL_MANAGEMENT
+  GENERAL_ENGINEERING
+}
+
+enum ProficiencyLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum OfferStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+}
+
+enum ApplicationStatus {
+  APPLIED
+  INTERVIEW_SCHEDULED
+  ACCEPTED
+  REJECTED
+}
+
+enum PlacementStatus {
+  PENDING_CONFIRMATION
+  CONFIRMED
+  REFUSED_BY_STUDENT
+  CANCELLED_BY_COMPANY
+}
+
+enum ConventionStatus {
+  DRAFT
+  GENERATED
+  SIGNED_BY_STUDENT
+  SIGNED_BY_COMPANY
+  APPROVED_BY_COORDINATOR
+  REJECTED
+}
+
+enum WorkLogStatus {
+  PENDING
+  VALIDATED_TUTOR
+  REJECTED
+}
+
+// 1. Utilizatori de sistem
+model User {
+  id           String          @id @default(uuid())
+  email        String          @unique
+  passwordHash String          @map("password_hash")
+  role         UserRole        @default(STUDENT)
+  firstName    String          @map("first_name")
+  lastName     String          @map("last_name")
+  isActive     Boolean         @default(true) @map("is_active")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+
+  studentProfile StudentProfile?
+  companyProfile CompanyProfile?
+
+  @@map("users")
+}
+
+// 2. Profiluri Studenți (Bio, Social Links & Inginerie)
+model StudentProfile {
+  id             String             @id @default(uuid())
+  userId         String             @unique @map("user_id")
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  faculty        String             @default("Facultatea de Inginerie ULBS")
+  specialization String
+  studyYear      Int                @map("study_year")
+  group          String
+  domain         EngineeringDomain  @default(COMPUTER_SCIENCE_IT)
+  headline       String?            // ex: "Student CTI pasionat de Cloud & Web"
+  bio            String?
+  phone          String?
+  cvUrl          String?            @map("cv_url") // STRICT PRIVAT: accesibil companiei doar daca studentul a aplicat
+  githubUrl      String?            @map("github_url")
+  linkedinUrl    String?            @map("linkedin_url")
+  portfolioUrl   String?            @map("portfolio_url")
+  availableFrom  DateTime?          @map("available_from")
+  availableTo    DateTime?          @map("available_to")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+
+  tags           StudentTag[]
+  preferences    StudentPreference[]
+  applicantRanks CompanyApplicantRank[]
+  placement      Placement?
+  interviewSlots InterviewSlot[]
+
+  @@map("student_profiles")
+}
+
+// 3. Taxonomie Competențe / Tag-uri
+model Tag {
+  id           String            @id @default(uuid())
+  name         String            @unique
+  domain       EngineeringDomain @default(COMPUTER_SCIENCE_IT)
+  isPredefined Boolean           @default(false) @map("is_predefined") // Predefinit (din catalog ULBS) vs Custom
+  createdAt    DateTime          @default(now()) @map("created_at")
+
+  studentTags  StudentTag[]
+  offerTags    OfferTag[]
+
+  @@map("tags")
+}
+
+// 4. Competențe Student (Many-to-Many cu nivel)
+model StudentTag {
+  id          String           @id @default(uuid())
+  studentId   String           @map("student_id")
+  student     StudentProfile   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  tagId       String           @map("tag_id")
+  tag         Tag              @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  proficiency ProficiencyLevel @default(INTERMEDIATE)
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  @@unique([studentId, tagId])
+  @@map("student_tags")
+}
+
+// 5. Profiluri Firme Partenere
+model CompanyProfile {
+  id           String            @id @default(uuid())
+  userId       String            @unique @map("user_id")
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyName  String            @map("company_name")
+  cuiCif       String            @unique @map("cui_cif")
+  address      String
+  city         String
+  website      String?
+  description  String?
+  contactPhone String?           @map("contact_phone")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+
+  offers       InternshipOffer[]
+
+  @@map("company_profiles")
+}
+
+// 6. Oferte de Practică cu Tag-uri cerute
+model InternshipOffer {
+  id              String                 @id @default(uuid())
+  companyId       String                 @map("company_id")
+  company         CompanyProfile         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  title           String
+  description     String
+  primaryDomain   EngineeringDomain      @default(COMPUTER_SCIENCE_IT) @map("primary_domain")
+  slotsTotal      Int                    @default(1) @map("slots_total")
+  slotsAvailable  Int                    @default(1) @map("slots_available")
+  location        String
+  isRemote        Boolean                @default(false) @map("is_remote")
+  startDate       DateTime               @map("start_date")
+  endDate         DateTime               @map("end_date")
+  tutorName       String                 @map("tutor_name")
+  tutorEmail      String                 @map("tutor_email")
+  status          OfferStatus            @default(ACTIVE)
+  createdAt       DateTime               @default(now()) @map("created_at")
+  updatedAt       DateTime               @updatedAt @map("updated_at")
+
+  offerTags       OfferTag[]
+  preferences     StudentPreference[]
+  applicantRanks  CompanyApplicantRank[]
+  placements      Placement[]
+  interviewSlots  InterviewSlot[]
+
+  @@map("internship_offers")
+}
+
+// 7. Competențe Cerute de Ofertă (Many-to-Many cu obligativitate & pondere)
+model OfferTag {
+  id         String          @id @default(uuid())
+  offerId    String          @map("offer_id")
+  offer      InternshipOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  tagId      String          @map("tag_id")
+  tag        Tag             @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  isRequired Boolean         @default(true) @map("is_required")
+  weight     Float           @default(1.0)
+  createdAt  DateTime        @default(now()) @map("created_at")
+
+  @@unique([offerId, tagId])
+  @@map("offer_tags")
+}
+
+// 8. Preferințe ordonate ale studenților pentru oferte
+model StudentPreference {
+  id        String          @id @default(uuid())
+  studentId String          @map("student_id")
+  student   StudentProfile  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  offerId   String          @map("offer_id")
+  offer     InternshipOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  rank      Int             // 1 = prima optiune a studentului
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+
+  @@unique([studentId, offerId])
+  @@unique([studentId, rank])
+  @@map("student_preferences")
+}
+
+// 9. Clasament/Ordonare aplicanți realizat de către firmă
+model CompanyApplicantRank {
+  id        String            @id @default(uuid())
+  offerId   String            @map("offer_id")
+  offer     InternshipOffer   @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  studentId String            @map("student_id")
+  student   StudentProfile    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  rank      Int               // 1 = cel mai dorit candidat de catre firma
+  feedback  String?
+  status    ApplicationStatus @default(APPLIED)
+  createdAt DateTime          @default(now()) @map("created_at")
+  updatedAt DateTime          @updatedAt @map("updated_at")
+
+  @@unique([offerId, studentId])
+  @@map("company_applicant_ranks")
+}
+
+// 10. Rezultat Matching / Plasament Stabil
+model Placement {
+  id          String                 @id @default(uuid())
+  studentId   String                 @unique @map("student_id") // Fiecare student primeste cel mult un loc
+  student     StudentProfile         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  offerId     String                 @map("offer_id")
+  offer       InternshipOffer        @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  status      PlacementStatus        @default(CONFIRMED)
+  matchedAt   DateTime               @default(now()) @map("matched_at")
+  confirmedAt DateTime?              @map("confirmed_at")
+  createdAt   DateTime               @default(now()) @map("created_at")
+  updatedAt   DateTime               @updatedAt @map("updated_at")
+
+  convention  InternshipConvention?
+  workLogs    WorkLog[]
+  evaluation  FinalEvaluation?
+
+  @@map("placements")
+}
+
+// 11. Convenții de practică generate (PDF & semnături)
+model InternshipConvention {
+  id               String           @id @default(uuid())
+  placementId      String           @unique @map("placement_id")
+  placement        Placement        @relation(fields: [placementId], references: [id], onDelete: Cascade)
+  conventionNumber String           @unique @map("convention_number")
+  status           ConventionStatus @default(DRAFT)
+  prefilledData    Json             @map("prefilled_data") // Date complete precompletate automat
+  generatedPdfUrl  String?          @map("generated_pdf_url")
+  signedPdfUrl     String?          @map("signed_pdf_url")
+  signedAt         DateTime?        @map("signed_at")
+  approvedAt       DateTime?        @map("approved_at")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  @@map("internship_conventions")
+}
+
+// 12. Pontaj ore / Jurnal săptămânal de activitate
+model WorkLog {
+  id              String        @id @default(uuid())
+  placementId     String        @map("placement_id")
+  placement       Placement     @relation(fields: [placementId], references: [id], onDelete: Cascade)
+  date            DateTime
+  hoursWorked     Int           @map("hours_worked")
+  activitySummary String        @map("activity_summary")
+  status          WorkLogStatus @default(PENDING)
+  tutorFeedback   String?       @map("tutor_feedback")
+  validatedAt     DateTime?     @map("validated_at")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  @@map("work_logs")
+}
+
+// 13. Programare sloturi interviu
+model InterviewSlot {
+  id          String          @id @default(uuid())
+  offerId     String          @map("offer_id")
+  offer       InternshipOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  studentId   String?         @map("student_id")
+  student     StudentProfile? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  startTime   DateTime        @map("start_time")
+  endTime     DateTime        @map("end_time")
+  meetingLink String?         @map("meeting_link")
+  isBooked    Boolean         @default(false) @map("is_booked")
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  @@map("interview_slots")
+}
+
+// 14. Fișă de evaluare finală a practicii
+model FinalEvaluation {
+  id                   String    @id @default(uuid())
+  placementId          String    @unique @map("placement_id")
+  placement            Placement @relation(fields: [placementId], references: [id], onDelete: Cascade)
+  grade                Float?
+  feedback             String?
+  competenciesAcquired String[]  @default([]) @map("competencies_acquired")
+  evaluatorName        String    @map("evaluator_name")
+  submittedAt          DateTime  @default(now()) @map("submitted_at")
+
+  @@map("final_evaluations")
+}
